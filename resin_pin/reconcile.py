@@ -28,16 +28,22 @@ def quote_re2(value: str) -> str:
 
 
 def pin_regex(tag: str) -> str:
-    return f"*^" + quote_re2(tag) + "$"
+    # Plain exact rule so older Resin builds (no `*` MUST prefix) still compile.
+    return "^" + quote_re2(tag) + "$"
 
 
 def managed_filters(tag: str) -> list[str]:
-    return [pin_regex(tag), MANAGED_MARKER]
+    return [pin_regex(tag)]
 
 
 def is_managed_platform(platform: dict[str, Any]) -> bool:
     filters = platform.get("regex_filters") or []
-    return MANAGED_MARKER in filters
+    if MANAGED_MARKER in filters:
+        return True
+    name = platform.get("name") or ""
+    if not _NAME_RE.match(name):
+        return False
+    return bool(filters) and str(filters[0]).startswith("^") and str(filters[0]).endswith("$")
 
 
 def node_tag(node: dict[str, Any]) -> str:

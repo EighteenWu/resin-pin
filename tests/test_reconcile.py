@@ -54,12 +54,14 @@ def healthy(region: str, idx: int, **overrides: object) -> dict:
 class FilterTests(unittest.TestCase):
     def test_quote_and_pin_regex_is_exact_must_rule(self) -> None:
         self.assertEqual(quote_re2("pool/hk-5.vip"), r"pool/hk-5\.vip")
-        self.assertEqual(pin_regex("pool/hk-5"), r"*^pool/hk-5$")
+        self.assertEqual(pin_regex("pool/hk-5"), r"^pool/hk-5$")
 
     def test_managed_marker_detects_our_platforms_only(self) -> None:
-        ours = {"regex_filters": [r"*^pool/hk-1$", MANAGED_MARKER]}
+        ours = {"name": "hk-1", "regex_filters": [r"^pool/hk-1$"]}
+        marked = {"name": "custom", "regex_filters": [r"^pool/hk-1$", MANAGED_MARKER]}
         manual = {"regex_filters": ["香港"], "name": "hk-1"}
         self.assertTrue(is_managed_platform(ours))
+        self.assertTrue(is_managed_platform(marked))
         self.assertFalse(is_managed_platform(manual))
 
     def test_eligible_requires_region_health_egress_and_tag(self) -> None:
@@ -91,7 +93,7 @@ class ReconcileTests(unittest.TestCase):
             first = reconcile(client, cfg(path), path)
             self.assertEqual(sorted(first.created), ["hk-1", "jp-1", "sg-1"])
             self.assertEqual(len(client.platforms), 3)
-            self.assertTrue(all(MANAGED_MARKER in item["regex_filters"] for item in client.platforms))
+            self.assertTrue(all(item["regex_filters"][0].startswith("^") for item in client.platforms))
 
             client.nodes.append(healthy("hk", 6))
             second = reconcile(client, cfg(path), path)
@@ -100,7 +102,7 @@ class ReconcileTests(unittest.TestCase):
             self.assertEqual(names, {"hk-1", "hk-2", "jp-1", "sg-1"})
 
             hk1 = next(item for item in client.platforms if item["name"] == "hk-1")
-            self.assertEqual(hk1["regex_filters"][0], r"*^pool/hk-5$")
+            self.assertEqual(hk1["regex_filters"][0], r"^pool/hk-5$")
             self.assertEqual(hk1["region_filters"], ["hk"])
 
     def test_does_not_steal_manual_platform_names(self) -> None:
@@ -142,7 +144,7 @@ class ReconcileTests(unittest.TestCase):
             node["tags"] = [{"tag": "pool/jp-1-renamed"}]
             result = reconcile(client, cfg(path), path)
             self.assertEqual(result.updated, ["jp-1"])
-            self.assertEqual(client.platforms[0]["regex_filters"][0], r"*^pool/jp-1-renamed$")
+            self.assertEqual(client.platforms[0]["regex_filters"][0], r"^pool/jp-1-renamed$")
 
     def test_catalog_builds_import_urls_and_live_status(self) -> None:
         client = FakeClient()
