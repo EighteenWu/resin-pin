@@ -34,11 +34,14 @@ if path.exists():
             continue
         key, _, value = line.partition("=")
         existing[key.strip()] = value
+public_host = existing.get("RESIN_PUBLIC_HOST") or """${RESIN_PUBLIC_HOST:-}"""
+if not public_host.strip():
+    raise SystemExit("set RESIN_PUBLIC_HOST in .env or the environment")
 existing.update({
     "RESIN_URL": "http://resin:2260",
     "RESIN_ADMIN_TOKEN": """${ADMIN}""",
     "RESIN_PROXY_TOKEN": """${PROXY}""",
-    "RESIN_PUBLIC_HOST": "pin.example.com",
+    "RESIN_PUBLIC_HOST": public_host,
     "RESIN_PUBLIC_PORT": "2260",
     "PIN_LISTEN": "0.0.0.0:2270",
     "PIN_STATE_PATH": "/data/state.json",
@@ -56,8 +59,6 @@ unset ADMIN PROXY
 mkdir -p "${REPO}/data"
 cd "${REPO}"
 docker compose up -d --build
-
-ufw allow 2270/tcp comment 'resin-pin ui' >/dev/null
 
 echo "deployed"
 docker ps --filter name=resin-pin --format '{{.Names}} {{.Status}} {{.Ports}}'
