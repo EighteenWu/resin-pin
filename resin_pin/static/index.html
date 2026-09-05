@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Resin Pin · 单节点代理</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ink: #14110d;
+        --panel: #1c1812;
+        --line: #3a3226;
+        --copper: #d08a3a;
+        --paper: #f3ead7;
+        --mute: #9a8d78;
+        --ready: #8fbf4a;
+        --hot: #d45c4c;
+        --warn: #d6a23a;
+        --cool: #6ea8a0;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; background: var(--ink); color: var(--paper); }
+      body {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        background-image:
+          radial-gradient(1200px 500px at 10% -10%, rgba(208, 138, 58, 0.16), transparent 55%),
+          linear-gradient(180deg, rgba(255,255,255,0.02), transparent 30%),
+          repeating-linear-gradient(90deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 28px);
+      }
+      .wrap { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 64px; }
+      header {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: end;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 18px;
+      }
+      .kicker {
+        color: var(--copper);
+        letter-spacing: 0.28em;
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+      h1 {
+        font-family: Syne, sans-serif;
+        font-size: clamp(32px, 5vw, 52px);
+        line-height: 0.9;
+        margin: 8px 0 0;
+        letter-spacing: -0.04em;
+      }
+      .sub { color: var(--mute); margin-top: 8px; font-size: 13px; }
+      .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: end; }
+      button, .chip {
+        font: inherit;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--paper);
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+      button.primary { background: var(--copper); color: #1a1208; border-color: var(--copper); font-weight: 600; }
+      button:disabled { opacity: 0.5; cursor: wait; }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin: 22px 0 16px;
+      }
+      .stat {
+        border: 1px solid var(--line);
+        padding: 14px 16px;
+        background: rgba(28, 24, 18, 0.86);
+      }
+      .stat b { display: block; font-family: Syne, sans-serif; font-size: 28px; margin-top: 4px; }
+      .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+      .chip.active { border-color: var(--copper); color: var(--copper); }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+      th { color: var(--mute); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 500; }
+      .url { font-size: 12px; word-break: break-all; color: #efe4cc; }
+      .pill {
+        display: inline-block;
+        padding: 3px 8px;
+        border: 1px solid currentColor;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+      }
+      .ready { color: var(--ready); }
+      .circuit, .gone, .disabled { color: var(--hot); }
+      .no_egress, .no_outbound, .not_routable { color: var(--warn); }
+      .login {
+        max-width: 420px;
+        margin: 12vh auto 0;
+        border: 1px solid var(--line);
+        padding: 28px;
+        background: var(--panel);
+      }
+      input {
+        width: 100%;
+        margin: 12px 0 16px;
+        padding: 12px;
+        background: #100e0b;
+        color: var(--paper);
+        border: 1px solid var(--line);
+        font: inherit;
+      }
+      .toast {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        background: var(--copper);
+        color: #1a1208;
+        padding: 10px 14px;
+        font-weight: 600;
+        display: none;
+      }
+      .empty { color: var(--mute); padding: 40px 0; }
+      @media (max-width: 800px) {
+        header, .stats { grid-template-columns: 1fr 1fr; }
+        .hide-wide { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap" id="app"></div>
+    <div class="toast" id="toast">已复制</div>
+    <script>
+      const TOKEN_KEY = "resin-pin-token";
+      const app = document.getElementById("app");
+      const toast = document.getElementById("toast");
+      let regionFilter = "all";
+      let catalog = null;
+
+      function token() {
+        return sessionStorage.getItem(TOKEN_KEY) || "";
+      }
+
+      function showToast(text) {
+        toast.textContent = text;
+        toast.style.display = "block";
+        setTimeout(() => (toast.style.display = "none"), 1400);
+      }
+
+      async function copyText(text) {
+        await navigator.clipboard.writeText(text);
+        showToast("已复制");
+      }
+
+      function headers() {
+        return { Authorization: "Bearer " + token() };
+      }
+
+      async function loadCatalog() {
+        const res = await fetch("/api/catalog", { headers: headers() });
+        if (res.status === 401) {
+          sessionStorage.removeItem(TOKEN_KEY);
+          renderLogin("Admin Token 不正确");
+          return;
+        }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || "加载失败");
+        catalog = data;
+        renderApp();
+      }
+
+      async function syncNow() {
+        const res = await fetch("/api/sync", { method: "POST", headers: headers() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || "同步失败");
+        catalog = data.catalog;
+        renderApp();
+        showToast("已同步");
+      }
+
+      function rows() {
+        const list = catalog?.rows || [];
+        if (regionFilter === "all") return list;
+        if (regionFilter === "ready") return list.filter((row) => row.ready);
+        return list.filter((row) => row.region === regionFilter);
+      }
+
+      function renderLogin(errorText) {
+        app.innerHTML = `
+          <div class="login">
+            <div class="kicker">Resin Pin</div>
+            <h1>接入核对</h1>
+            <p class="sub">用 Resin Admin Token 查看单节点代理链接。</p>
+            ${errorText ? `<p class="sub" style="color:var(--hot)">${errorText}</p>` : ""}
+            <form id="login">
+              <input type="password" name="token" placeholder="Admin Token" autocomplete="current-password" required />
+              <button class="primary" type="submit">进入机柜</button>
+            </form>
+          </div>`;
+        document.getElementById("login").addEventListener("submit", async (ev) => {
+          ev.preventDefault();
+          sessionStorage.setItem(TOKEN_KEY, new FormData(ev.target).get("token"));
+          try {
+            await loadCatalog();
+          } catch (err) {
+            renderLogin(err.message);
+          }
+        });
+      }
+
+      function pill(row) {
+        return `<span class="pill ${row.status}">${row.status_label}</span>`;
+      }
+
+      function renderApp() {
+        const counts = catalog.counts || {};
+        const ready = catalog.ready_count || 0;
+        const list = rows();
+        const syncAt = catalog.last_sync?.at ? new Date(catalog.last_sync.at).toLocaleString() : "尚未同步";
+        app.innerHTML = `
+          <header>
+            <div>
+              <div class="kicker">Patch bay · ${catalog.public_host}</div>
+              <h1>单节点代理</h1>
+              <p class="sub">TW / JP / HK / SG 可用节点各绑一个 Platform。一键复制后可导入 hysj-helper。</p>
+            </div>
+            <div class="actions">
+              <button id="copyAll" class="primary" ${ready ? "" : "disabled"}>一键复制可用 ${ready}</button>
+              <button id="sync">立即同步</button>
+              <button id="logout">退出</button>
+            </div>
+          </header>
+          <section class="stats">
+            <div class="stat">可用<b>${ready}</b></div>
+            <div class="stat">全部钉住<b>${catalog.total || 0}</b></div>
+            <div class="stat">熔断<b>${counts.circuit || 0}</b></div>
+            <div class="stat">上次同步<b style="font-size:16px">${syncAt}</b></div>
+          </section>
+          <div class="filters">
+            ${["all", "ready", ...(catalog.regions || [])]
+              .map((item) => `<button class="chip ${regionFilter === item ? "active" : ""}" data-region="${item}">${item}</button>`)
+              .join("")}
+          </div>
+          ${
+            list.length
+              ? `<table>
+                  <thead>
+                    <tr>
+                      <th>平台</th>
+                      <th>状态</th>
+                      <th class="hide-wide">出口</th>
+                      <th class="hide-wide">延迟</th>
+                      <th>代理链接</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${list
+                      .map(
+                        (row) => `<tr>
+                          <td>${row.name}<div class="sub">${row.region} · ${row.tag || ""}</div></td>
+                          <td>${pill(row)}</td>
+                          <td class="hide-wide">${row.egress_ip || "—"}</td>
+                          <td class="hide-wide">${row.latency_ms != null ? Math.round(row.latency_ms) + " ms" : "—"}</td>
+                          <td class="url">${row.proxy_url}</td>
+                          <td><button data-copy="${encodeURIComponent(row.proxy_url)}">复制</button></td>
+                        </tr>`
+                      )
+                      .join("")}
+                  </tbody>
+                </table>`
+              : `<p class="empty">还没有钉住的节点。先点「立即同步」，或等每日对账跑完。</p>`
+          }
+        `;
+        document.getElementById("copyAll").addEventListener("click", () => copyText(catalog.copy_all || ""));
+        document.getElementById("sync").addEventListener("click", async (ev) => {
+          ev.target.disabled = true;
+          try {
+            await syncNow();
+          } catch (err) {
+            showToast(err.message);
+            ev.target.disabled = false;
+          }
+        });
+        document.getElementById("logout").addEventListener("click", () => {
+          sessionStorage.removeItem(TOKEN_KEY);
+          renderLogin("");
+        });
+        app.querySelectorAll("[data-region]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            regionFilter = btn.dataset.region;
+            renderApp();
+          });
+        });
+        app.querySelectorAll("[data-copy]").forEach((btn) => {
+          btn.addEventListener("click", () => copyText(decodeURIComponent(btn.dataset.copy)));
+        });
+      }
+
+      if (!token()) renderLogin("");
+      else loadCatalog().catch((err) => renderLogin(err.message));
+    </script>
+  </body>
+</html>
