@@ -4,9 +4,10 @@ import os
 from dataclasses import dataclass
 
 
-REGIONS = ("tw", "jp", "hk", "sg")
+REGIONS = ("tw", "jp", "hk", "sg", "kr")
 MANAGED_MARKER = "!^__resin_pin_managed__$"
-NAME_PATTERN = r"^(tw|jp|hk|sg)-\d+$"
+NAME_PATTERN = r"^([a-z]{2})-(\d+)$"
+REGION_ALIASES = {"sgp": "sg", "korea": "kr", "kor": "kr"}
 
 
 def _env(name: str, default: str = "") -> str:
@@ -54,8 +55,8 @@ class Config:
         ui_token = _env("PIN_UI_TOKEN") or admin_token
         regions_raw = _env("PIN_REGIONS", ",".join(REGIONS))
         regions = tuple(
-            item.strip().lower()
-            for item in regions_raw.replace("sgp", "sg").split(",")
+            REGION_ALIASES.get(item.strip().lower(), item.strip().lower())
+            for item in regions_raw.split(",")
             if item.strip()
         )
         return cls(

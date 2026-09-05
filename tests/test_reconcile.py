@@ -31,7 +31,7 @@ def cfg(state_path: str) -> Config:
         sync_interval_seconds=86400,
         sync_on_start=True,
         ui_token="admin",
-        regions=("tw", "jp", "hk", "sg"),
+        regions=("tw", "jp", "hk", "sg", "kr"),
     )
 
 
@@ -65,8 +65,9 @@ class FilterTests(unittest.TestCase):
         self.assertFalse(is_managed_platform(manual))
 
     def test_eligible_requires_region_health_egress_and_tag(self) -> None:
-        regions = ("tw", "jp", "hk", "sg")
+        regions = ("tw", "jp", "hk", "sg", "kr")
         self.assertTrue(is_eligible(healthy("hk", 1), regions))
+        self.assertTrue(is_eligible(healthy("kr", 1), regions))
         self.assertFalse(is_eligible(healthy("us", 1), regions))
         self.assertFalse(is_eligible(healthy("hk", 1, circuit_open_since="2026-01-01T00:00:00Z"), regions))
         self.assertFalse(is_eligible(healthy("hk", 1, egress_ip=""), regions))
@@ -87,19 +88,19 @@ class FilterTests(unittest.TestCase):
 class ReconcileTests(unittest.TestCase):
     def test_creates_one_platform_per_healthy_node_and_stable_names(self) -> None:
         client = FakeClient()
-        client.nodes = [healthy("hk", 5), healthy("jp", 1), healthy("sg", 2)]
+        client.nodes = [healthy("hk", 5), healthy("jp", 1), healthy("sg", 2), healthy("kr", 1)]
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "state.json")
             first = reconcile(client, cfg(path), path)
-            self.assertEqual(sorted(first.created), ["hk-1", "jp-1", "sg-1"])
-            self.assertEqual(len(client.platforms), 3)
+            self.assertEqual(sorted(first.created), ["hk-1", "jp-1", "kr-1", "sg-1"])
+            self.assertEqual(len(client.platforms), 4)
             self.assertTrue(all(item["regex_filters"][0].startswith("^") for item in client.platforms))
 
             client.nodes.append(healthy("hk", 6))
             second = reconcile(client, cfg(path), path)
             self.assertEqual(second.created, ["hk-2"])
             names = {item["name"] for item in client.platforms}
-            self.assertEqual(names, {"hk-1", "hk-2", "jp-1", "sg-1"})
+            self.assertEqual(names, {"hk-1", "hk-2", "jp-1", "kr-1", "sg-1"})
 
             hk1 = next(item for item in client.platforms if item["name"] == "hk-1")
             self.assertEqual(hk1["regex_filters"][0], r"^pool/hk-5$")

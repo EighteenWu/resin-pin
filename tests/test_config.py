@@ -9,7 +9,7 @@ from resin_pin.config import Config
 class ConfigTests(unittest.TestCase):
     def test_sgp_alias_and_proxy_url(self) -> None:
         keys = {
-            "PIN_REGIONS": "tw, jp, hk, sgp",
+            "PIN_REGIONS": "tw, jp, hk, sgp, korea",
             "RESIN_PROXY_TOKEN": "proxy-token",
             "RESIN_PUBLIC_HOST": "pin.example.com",
             "RESIN_PUBLIC_PORT": "2260",
@@ -29,7 +29,7 @@ class ConfigTests(unittest.TestCase):
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
-        self.assertEqual(cfg.regions, ("tw", "jp", "hk", "sg"))
+        self.assertEqual(cfg.regions, ("tw", "jp", "hk", "sg", "kr"))
         self.assertEqual(cfg.proxy_url("hk-5"), "http://hk-5:proxy-token@pin.example.com:2260")
         self.assertEqual(cfg.pull_token, "pull-secret")
 

@@ -44,7 +44,7 @@ existing.update({
     "PIN_STATE_PATH": "/data/state.json",
     "PIN_SYNC_ON_START": "true",
     "PIN_SYNC_INTERVAL_SECONDS": "86400",
-    "PIN_REGIONS": "tw,jp,hk,sg",
+    "PIN_REGIONS": "tw,jp,hk,sg,kr",
 })
 lines = [f"{key}={value}" for key, value in existing.items()]
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")

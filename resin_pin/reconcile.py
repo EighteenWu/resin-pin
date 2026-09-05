@@ -4,11 +4,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from .config import MANAGED_MARKER, Config
+from .config import MANAGED_MARKER, NAME_PATTERN, Config
 from .state import load_state, save_state
 
 _RE2_SPECIAL = re.compile(r"([\\.+*?()|\[\]{}^$])")
-_NAME_RE = re.compile(r"^(tw|jp|hk|sg)-(\d+)$")
+_NAME_RE = re.compile(NAME_PATTERN)
 
 
 class PlatformAPI(Protocol):

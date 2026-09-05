@@ -230,7 +230,7 @@
             <div>
               <div class="kicker">Patch bay · ${catalog.public_host}</div>
               <h1>单节点代理</h1>
-              <p class="sub">TW / JP / HK / SG 可用节点各绑一个 Platform。下游项目订阅 <code>api/export?token=拉取密钥</code> 即可按间隔自动更新。</p>
+              <p class="sub">${(catalog.regions || []).map((item) => item.toUpperCase()).join(" / ")} 可用节点各绑一个 Platform。下游项目订阅 <code>api/export?token=拉取密钥</code> 即可按间隔自动更新。</p>
             </div>
             <div class="actions">
               <button id="copyAll" class="primary" ${ready ? "" : "disabled"}>一键复制可用 ${ready}</button>
@@ -246,7 +246,7 @@
           </section>
           <div class="filters">
             ${["all", "ready", ...(catalog.regions || [])]
-              .map((item) => `<button class="chip ${regionFilter === item ? "active" : ""}" data-region="${item}">${item}</button>`)
+              .map((item) => `<button class="chip ${regionFilter === item ? "active" : ""}" data-region="${item}">${item === "all" || item === "ready" ? item : item.toUpperCase()}</button>`)
               .join("")}
           </div>
           ${
