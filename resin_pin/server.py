@@ -8,10 +8,11 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .client import ResinClient, ResinError
 from .config import Config
+from .export import export_json, export_text, ready_items
 from .reconcile import SyncResult, catalog_rows, reconcile, status_label
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -72,6 +73,9 @@ class App:
             "status_labels": {code: status_label(code) for code in counts},
         }
 
+    def export_items(self) -> list[dict[str, str]]:
+        return ready_items(catalog_rows(self.client, self.cfg))
+
 
 def _unauthorized(handler: BaseHTTPRequestHandler) -> None:
     handler.send_response(401)
@@ -81,8 +85,19 @@ def _unauthorized(handler: BaseHTTPRequestHandler) -> None:
     handler.wfile.write(b'{"error":{"code":"UNAUTHORIZED","message":"invalid token"}}')
 
 
+def _token_matches(given: str, expected: str) -> bool:
+    if not expected:
+        return True
+    left = given.encode("utf-8")
+    right = expected.encode("utf-8")
+    if len(left) != len(right):
+        return False
+    return hmac.compare_digest(left, right)
+
+
 def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
-    token = app.cfg.ui_token
+    ui_token = app.cfg.ui_token
+    pull_token = app.cfg.pull_token
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: object) -> None:
@@ -105,26 +120,50 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(raw)
 
-        def _authorized(self) -> bool:
-            if not token:
-                return True
+        def _bearer(self) -> str:
             header = self.headers.get("Authorization") or ""
-            if not header.startswith("Bearer "):
-                return False
-            given = header[7:].encode("utf-8")
-            expected = token.encode("utf-8")
-            if len(given) != len(expected):
-                return False
-            return hmac.compare_digest(given, expected)
+            if header.startswith("Bearer "):
+                return header[7:]
+            return ""
+
+        def _query_token(self) -> str:
+            return (parse_qs(urlparse(self.path).query).get("token") or [""])[0]
+
+        def _authorized(self) -> bool:
+            return _token_matches(self._bearer(), ui_token)
+
+        def _pull_authorized(self) -> bool:
+            return _token_matches(self._query_token() or self._bearer(), pull_token)
 
         def do_GET(self) -> None:  # noqa: N802
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
             if path in {"/", "/index.html"}:
                 html = (STATIC_DIR / "index.html").read_bytes()
                 self._ok(html, "text/html; charset=utf-8")
                 return
             if path == "/healthz":
                 self._json({"ok": True, "syncing": app.syncing})
+                return
+            if path in {"/api/export", "/api/export.json"}:
+                if not self._pull_authorized():
+                    _unauthorized(self)
+                    return
+                try:
+                    items = app.export_items()
+                except ResinError as exc:
+                    self._json({"error": {"code": "RESIN", "message": exc.message}}, 502)
+                    return
+                except Exception as exc:
+                    self._json({"error": {"code": "INTERNAL", "message": str(exc)}}, 500)
+                    return
+                query = parse_qs(parsed.query)
+                want_json = path.endswith(".json") or (query.get("format") or [""])[0].lower() == "json"
+                if want_json:
+                    self._json(export_json(items))
+                    return
+                body = (export_text(items) + ("\n" if items else "")).encode("utf-8")
+                self._ok(body, "text/plain; charset=utf-8")
                 return
             if path == "/api/catalog":
                 if not self._authorized():

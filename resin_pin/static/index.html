@@ -147,6 +147,14 @@
         setTimeout(() => (toast.style.display = "none"), 1400);
       }
 
+      function escapeHtml(value) {
+        return String(value || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
       async function copyText(text) {
         await navigator.clipboard.writeText(text);
         showToast("已复制");
@@ -222,7 +230,7 @@
             <div>
               <div class="kicker">Patch bay · ${catalog.public_host}</div>
               <h1>单节点代理</h1>
-              <p class="sub">TW / JP / HK / SG 可用节点各绑一个 Platform。一键复制后可导入 hysj-helper。</p>
+              <p class="sub">TW / JP / HK / SG 可用节点各绑一个 Platform。下游项目订阅 <code>api/export?token=拉取密钥</code> 即可按间隔自动更新。</p>
             </div>
             <div class="actions">
               <button id="copyAll" class="primary" ${ready ? "" : "disabled"}>一键复制可用 ${ready}</button>

@@ -17,6 +17,7 @@ class ConfigTests(unittest.TestCase):
             "RESIN_URL": "http://resin",
             "PIN_LISTEN": "0.0.0.0:2270",
             "PIN_STATE_PATH": "./data/state.json",
+            "PIN_PULL_TOKEN": "pull-secret",
         }
         old = {key: os.environ.get(key) for key in keys}
         os.environ.update(keys)
@@ -30,6 +31,7 @@ class ConfigTests(unittest.TestCase):
                     os.environ[key] = value
         self.assertEqual(cfg.regions, ("tw", "jp", "hk", "sg"))
         self.assertEqual(cfg.proxy_url("hk-5"), "http://hk-5:proxy-token@pin.example.com:2260")
+        self.assertEqual(cfg.pull_token, "pull-secret")
 
 
 if __name__ == "__main__":
