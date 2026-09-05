@@ -157,7 +157,7 @@
       }
 
       async function loadCatalog() {
-        const res = await fetch("/api/catalog", { headers: headers() });
+        const res = await fetch("api/catalog", { headers: headers() });
         if (res.status === 401) {
           sessionStorage.removeItem(TOKEN_KEY);
           renderLogin("Admin Token 不正确");
@@ -170,7 +170,7 @@
       }
 
       async function syncNow() {
-        const res = await fetch("/api/sync", { method: "POST", headers: headers() });
+        const res = await fetch("api/sync", { method: "POST", headers: headers() });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error?.message || "同步失败");
         catalog = data.catalog;
