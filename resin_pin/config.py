@@ -8,6 +8,8 @@ REGIONS = ("tw", "jp", "hk", "sg", "kr")
 MANAGED_MARKER = "!^__resin_pin_managed__$"
 NAME_PATTERN = r"^([a-z]{2})-(\d+)$"
 REGION_ALIASES = {"sgp": "sg", "korea": "kr", "kor": "kr"}
+MIN_SYNC_INTERVAL_SECONDS = 60
+MAX_SYNC_INTERVAL_SECONDS = 7 * 86400
 
 
 def _env(name: str, default: str = "") -> str:
@@ -80,3 +82,25 @@ class Config:
         password = self.proxy_token
         auth = f"{user}:{password}@" if password != "" else f"{user}@"
         return f"http://{auth}{self.public_host}:{self.public_port}"
+
+
+def normalize_sync_interval(value: object) -> int:
+    if isinstance(value, bool) or value is None:
+        raise ValueError("sync_interval_seconds must be an integer")
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            raise ValueError("sync_interval_seconds must be an integer")
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("sync_interval_seconds must be an integer") from exc
+    if seconds < 0:
+        raise ValueError("sync_interval_seconds must be >= 0")
+    if seconds == 0:
+        return 0
+    if seconds < MIN_SYNC_INTERVAL_SECONDS:
+        raise ValueError(f"sync_interval_seconds must be 0 or >= {MIN_SYNC_INTERVAL_SECONDS}")
+    if seconds > MAX_SYNC_INTERVAL_SECONDS:
+        raise ValueError(f"sync_interval_seconds must be <= {MAX_SYNC_INTERVAL_SECONDS}")
+    return seconds

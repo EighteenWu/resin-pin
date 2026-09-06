@@ -79,6 +79,39 @@
       }
       .stat b { display: block; font-family: Syne, sans-serif; font-size: 28px; margin-top: 4px; }
       .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+      .settings {
+        display: grid;
+        grid-template-columns: minmax(180px, 220px) minmax(140px, 1fr) auto;
+        gap: 12px 18px;
+        align-items: end;
+        margin: 0 0 16px;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        background: rgba(28, 24, 18, 0.86);
+      }
+      .settings label {
+        display: block;
+        color: var(--mute);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      .settings .hint { color: var(--mute); font-size: 12px; padding-bottom: 8px; }
+      .login input, .settings input, .settings select {
+        width: 100%;
+        margin: 8px 0 0;
+        padding: 10px 12px;
+        background: #100e0b;
+        color: var(--paper);
+        border: 1px solid var(--line);
+        font: inherit;
+      }
+      .settings .custom {
+        display: flex;
+        gap: 8px;
+        align-items: end;
+      }
+      .settings .custom input { width: 110px; margin-top: 8px; }
       .chip.active { border-color: var(--copper); color: var(--copper); }
       table { width: 100%; border-collapse: collapse; }
       th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -101,15 +134,7 @@
         padding: 28px;
         background: var(--panel);
       }
-      input {
-        width: 100%;
-        margin: 12px 0 16px;
-        padding: 12px;
-        background: #100e0b;
-        color: var(--paper);
-        border: 1px solid var(--line);
-        font: inherit;
-      }
+      .login input { margin: 12px 0 16px; padding: 12px; }
       .toast {
         position: fixed;
         right: 18px;
@@ -122,7 +147,7 @@
       }
       .empty { color: var(--mute); padding: 40px 0; }
       @media (max-width: 800px) {
-        header, .stats { grid-template-columns: 1fr 1fr; }
+        header, .stats, .settings { grid-template-columns: 1fr 1fr; }
         .hide-wide { display: none; }
       }
     </style>
@@ -136,6 +161,15 @@
       const toast = document.getElementById("toast");
       let regionFilter = "all";
       let catalog = null;
+      const INTERVAL_PRESETS = [
+        { value: 0, label: "关闭" },
+        { value: 900, label: "15 分钟" },
+        { value: 1800, label: "30 分钟" },
+        { value: 3600, label: "1 小时" },
+        { value: 21600, label: "6 小时" },
+        { value: 43200, label: "12 小时" },
+        { value: 86400, label: "每天" },
+      ];
 
       function token() {
         return sessionStorage.getItem(TOKEN_KEY) || "";
@@ -186,6 +220,42 @@
         showToast("已同步");
       }
 
+      async function saveInterval(seconds) {
+        const res = await fetch("api/settings", {
+          method: "POST",
+          headers: { ...headers(), "Content-Type": "application/json" },
+          body: JSON.stringify({ sync_interval_seconds: seconds }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || "保存失败");
+        catalog = { ...catalog, sync_interval_seconds: data.sync_interval_seconds, next_sync_at: data.next_sync_at };
+        renderApp();
+        showToast(seconds ? "已更新同步间隔" : "已关闭定时同步");
+      }
+
+      function formatInterval(seconds) {
+        if (!seconds) return "已关闭";
+        if (seconds % 86400 === 0) return seconds / 86400 + " 天";
+        if (seconds % 3600 === 0) return seconds / 3600 + " 小时";
+        if (seconds % 60 === 0) return seconds / 60 + " 分钟";
+        return seconds + " 秒";
+      }
+
+      function nextSyncLabel() {
+        const seconds = catalog?.sync_interval_seconds || 0;
+        if (!seconds) return "定时已关闭";
+        const next = catalog?.next_sync_at;
+        if (!next) return "每 " + formatInterval(seconds);
+        const at = new Date(next);
+        if (Number.isNaN(at.getTime())) return "每 " + formatInterval(seconds);
+        if (at.getTime() <= Date.now()) return "即将同步";
+        return at.toLocaleString();
+      }
+
+      function intervalSelectValue(seconds) {
+        return INTERVAL_PRESETS.some((item) => item.value === seconds) ? String(seconds) : "custom";
+      }
+
       function rows() {
         const list = catalog?.rows || [];
         if (regionFilter === "all") return list;
@@ -225,6 +295,8 @@
         const ready = catalog.ready_count || 0;
         const list = rows();
         const syncAt = catalog.last_sync?.at ? new Date(catalog.last_sync.at).toLocaleString() : "尚未同步";
+        const interval = Number(catalog.sync_interval_seconds || 0);
+        const selected = intervalSelectValue(interval);
         app.innerHTML = `
           <header>
             <div>
@@ -243,6 +315,21 @@
             <div class="stat">全部钉住<b>${catalog.total || 0}</b></div>
             <div class="stat">熔断<b>${counts.circuit || 0}</b></div>
             <div class="stat">上次同步<b style="font-size:16px">${syncAt}</b></div>
+          </section>
+          <section class="settings">
+            <label>同步间隔
+              <select id="interval">
+                ${INTERVAL_PRESETS.map((item) => `<option value="${item.value}" ${selected === String(item.value) ? "selected" : ""}>${item.label}</option>`).join("")}
+                <option value="custom" ${selected === "custom" ? "selected" : ""}>自定义</option>
+              </select>
+            </label>
+            <div class="custom" id="customWrap" style="${selected === "custom" ? "" : "display:none"}">
+              <label>分钟
+                <input id="customMinutes" type="number" min="1" step="1" value="${Math.max(1, Math.round(interval / 60) || 60)}" />
+              </label>
+              <button id="saveCustom" type="button">应用</button>
+            </div>
+            <div class="hint">下次同步<b style="display:block;color:var(--paper);font-size:16px;margin-top:6px">${nextSyncLabel()}</b></div>
           </section>
           <div class="filters">
             ${["all", "ready", ...(catalog.regions || [])]
@@ -277,7 +364,7 @@
                       .join("")}
                   </tbody>
                 </table>`
-              : `<p class="empty">还没有钉住的节点。先点「立即同步」，或等每日对账跑完。</p>`
+              : `<p class="empty">还没有钉住的节点。先点「立即同步」，或等定时对账跑完。</p>`
           }
         `;
         document.getElementById("copyAll").addEventListener("click", () => copyText(catalog.copy_all || ""));
@@ -293,6 +380,36 @@
         document.getElementById("logout").addEventListener("click", () => {
           sessionStorage.removeItem(TOKEN_KEY);
           renderLogin("");
+        });
+        const intervalEl = document.getElementById("interval");
+        const customWrap = document.getElementById("customWrap");
+        intervalEl.addEventListener("change", async () => {
+          if (intervalEl.value === "custom") {
+            customWrap.style.display = "";
+            return;
+          }
+          customWrap.style.display = "none";
+          intervalEl.disabled = true;
+          try {
+            await saveInterval(Number(intervalEl.value));
+          } catch (err) {
+            showToast(err.message);
+            intervalEl.disabled = false;
+          }
+        });
+        document.getElementById("saveCustom").addEventListener("click", async (ev) => {
+          const minutes = Number(document.getElementById("customMinutes").value);
+          if (!Number.isInteger(minutes) || minutes < 1) {
+            showToast("请输入不少于 1 的整数分钟");
+            return;
+          }
+          ev.target.disabled = true;
+          try {
+            await saveInterval(minutes * 60);
+          } catch (err) {
+            showToast(err.message);
+            ev.target.disabled = false;
+          }
         });
         app.querySelectorAll("[data-region]").forEach((btn) => {
           btn.addEventListener("click", () => {

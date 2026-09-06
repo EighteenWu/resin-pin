@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 
-from resin_pin.config import Config
+from resin_pin.config import Config, normalize_sync_interval
 
 
 class ConfigTests(unittest.TestCase):
@@ -32,6 +32,16 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.regions, ("tw", "jp", "hk", "sg", "kr"))
         self.assertEqual(cfg.proxy_url("hk-5"), "http://hk-5:proxy-token@pin.example.com:2260")
         self.assertEqual(cfg.pull_token, "pull-secret")
+
+    def test_normalize_sync_interval(self) -> None:
+        self.assertEqual(normalize_sync_interval(0), 0)
+        self.assertEqual(normalize_sync_interval("3600"), 3600)
+        with self.assertRaises(ValueError):
+            normalize_sync_interval(30)
+        with self.assertRaises(ValueError):
+            normalize_sync_interval(-1)
+        with self.assertRaises(ValueError):
+            normalize_sync_interval(True)
 
 
 if __name__ == "__main__":

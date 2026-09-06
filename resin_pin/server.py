@@ -4,16 +4,17 @@ import hmac
 import json
 import threading
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .client import ResinClient, ResinError
-from .config import Config
+from .config import Config, normalize_sync_interval
 from .export import export_json, export_text, ready_items
 from .reconcile import SyncResult, catalog_rows, reconcile, status_label
+from .state import load_state, patch_state
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -32,6 +33,9 @@ class App:
         self.lock = threading.Lock()
         self.syncing = False
         self.last = SyncSnapshot()
+        self.sync_wake = threading.Event()
+        self.sync_interval_seconds = _load_sync_interval(cfg)
+        self.wait_started_at: datetime | None = None
 
     def run_sync(self) -> SyncResult:
         with self.lock:
@@ -70,8 +74,23 @@ class App:
             "regions": list(self.cfg.regions),
             "syncing": self.syncing,
             "last_sync": asdict(self.last),
+            "sync_interval_seconds": self.sync_interval_seconds,
+            "next_sync_at": self.next_sync_at(),
             "status_labels": {code: status_label(code) for code in counts},
         }
+
+    def next_sync_at(self) -> str | None:
+        if self.sync_interval_seconds <= 0 or self.wait_started_at is None:
+            return None
+        return (self.wait_started_at + timedelta(seconds=self.sync_interval_seconds)).isoformat()
+
+    def set_sync_interval(self, value: object) -> int:
+        seconds = normalize_sync_interval(value)
+        patch_state(self.cfg.state_path, sync_interval_seconds=seconds)
+        self.sync_interval_seconds = seconds
+        self.wait_started_at = datetime.now(timezone.utc)
+        self.sync_wake.set()
+        return seconds
 
     def export_items(self) -> list[dict[str, str]]:
         return ready_items(catalog_rows(self.client, self.cfg))
@@ -178,13 +197,41 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 return
             self.send_error(404)
 
+        def _read_json(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0:
+                return {}
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("JSON object required")
+            return data
+
         def do_POST(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
-            if path != "/api/sync":
+            if path not in {"/api/sync", "/api/settings"}:
                 self.send_error(404)
                 return
             if not self._authorized():
                 _unauthorized(self)
+                return
+            if path == "/api/settings":
+                try:
+                    payload = self._read_json()
+                    seconds = app.set_sync_interval(payload.get("sync_interval_seconds"))
+                except json.JSONDecodeError:
+                    self._json({"error": {"code": "BAD_REQUEST", "message": "invalid JSON"}}, 400)
+                    return
+                except ValueError as exc:
+                    self._json({"error": {"code": "BAD_REQUEST", "message": str(exc)}}, 400)
+                    return
+                self._json(
+                    {
+                        "ok": True,
+                        "sync_interval_seconds": seconds,
+                        "next_sync_at": app.next_sync_at(),
+                    }
+                )
                 return
             try:
                 result = app.run_sync()
@@ -203,11 +250,20 @@ def serve(cfg: Config) -> None:
     app = App(cfg)
     if cfg.sync_on_start:
         threading.Thread(target=_safe_sync, args=(app,), name="pin-sync-start", daemon=True).start()
-    if cfg.sync_interval_seconds > 0:
-        threading.Thread(target=_loop_sync, args=(app, cfg.sync_interval_seconds), name="pin-sync-loop", daemon=True).start()
+    threading.Thread(target=_loop_sync, args=(app,), name="pin-sync-loop", daemon=True).start()
     server = ThreadingHTTPServer((cfg.listen_host, cfg.listen_port), make_handler(app))
     print(f"resin-pin listening on http://{cfg.listen_host}:{cfg.listen_port}", flush=True)
     server.serve_forever()
+
+
+def _load_sync_interval(cfg: Config) -> int:
+    raw = load_state(cfg.state_path).get("sync_interval_seconds")
+    if raw is None:
+        return cfg.sync_interval_seconds
+    try:
+        return normalize_sync_interval(raw)
+    except ValueError:
+        return cfg.sync_interval_seconds
 
 
 def _safe_sync(app: App) -> None:
@@ -217,9 +273,18 @@ def _safe_sync(app: App) -> None:
         print(f"startup sync failed: {exc}", flush=True)
 
 
-def _loop_sync(app: App, interval: int) -> None:
+def _loop_sync(app: App) -> None:
     while True:
-        threading.Event().wait(interval)
+        interval = app.sync_interval_seconds
+        app.wait_started_at = datetime.now(timezone.utc)
+        if interval <= 0:
+            app.sync_wake.wait()
+            app.sync_wake.clear()
+            continue
+        woken = app.sync_wake.wait(interval)
+        app.sync_wake.clear()
+        if woken:
+            continue
         try:
             app.run_sync()
         except RuntimeError:
