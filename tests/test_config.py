@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 
-from resin_pin.config import Config, normalize_sync_interval
+from resin_pin.config import Config, normalize_max_latency_ms, normalize_sync_interval
 
 
 class ConfigTests(unittest.TestCase):
@@ -18,6 +18,7 @@ class ConfigTests(unittest.TestCase):
             "PIN_LISTEN": "0.0.0.0:2270",
             "PIN_STATE_PATH": "./data/state.json",
             "PIN_PULL_TOKEN": "pull-secret",
+            "PIN_MAX_LATENCY_MS": "180",
         }
         old = {key: os.environ.get(key) for key in keys}
         os.environ.update(keys)
@@ -32,6 +33,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.regions, ("tw", "jp", "hk", "sg", "kr"))
         self.assertEqual(cfg.proxy_url("hk-5"), "http://hk-5:proxy-token@pin.example.com:2260")
         self.assertEqual(cfg.pull_token, "pull-secret")
+        self.assertEqual(cfg.max_latency_ms, 180)
 
     def test_normalize_sync_interval(self) -> None:
         self.assertEqual(normalize_sync_interval(0), 0)
@@ -42,6 +44,16 @@ class ConfigTests(unittest.TestCase):
             normalize_sync_interval(-1)
         with self.assertRaises(ValueError):
             normalize_sync_interval(True)
+
+    def test_normalize_max_latency_ms(self) -> None:
+        self.assertEqual(normalize_max_latency_ms(0), 0)
+        self.assertEqual(normalize_max_latency_ms("180"), 180)
+        with self.assertRaises(ValueError):
+            normalize_max_latency_ms(-1)
+        with self.assertRaises(ValueError):
+            normalize_max_latency_ms(True)
+        with self.assertRaises(ValueError):
+            normalize_max_latency_ms("")
 
 
 if __name__ == "__main__":

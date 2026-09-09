@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .client import ResinClient, ResinError
-from .config import Config, normalize_sync_interval
+from .config import Config, normalize_max_latency_ms, normalize_sync_interval
 from .export import export_json, export_text, ready_items
 from .reconcile import SyncResult, catalog_rows, reconcile, status_label
 from .state import load_state, patch_state
@@ -35,6 +35,7 @@ class App:
         self.last = SyncSnapshot()
         self.sync_wake = threading.Event()
         self.sync_interval_seconds = _load_sync_interval(cfg)
+        self.max_latency_ms = _load_max_latency_ms(cfg)
         self.wait_started_at: datetime | None = None
 
     def run_sync(self) -> SyncResult:
@@ -59,7 +60,7 @@ class App:
             self.syncing = False
 
     def catalog(self) -> dict[str, Any]:
-        rows = catalog_rows(self.client, self.cfg)
+        rows = catalog_rows(self.client, self.cfg, max_latency_ms=self.max_latency_ms)
         counts: dict[str, int] = {}
         for row in rows:
             counts[row["status"]] = counts.get(row["status"], 0) + 1
@@ -75,6 +76,7 @@ class App:
             "syncing": self.syncing,
             "last_sync": asdict(self.last),
             "sync_interval_seconds": self.sync_interval_seconds,
+            "max_latency_ms": self.max_latency_ms,
             "next_sync_at": self.next_sync_at(),
             "status_labels": {code: status_label(code) for code in counts},
         }
@@ -92,8 +94,14 @@ class App:
         self.sync_wake.set()
         return seconds
 
+    def set_max_latency_ms(self, value: object) -> int:
+        ms = normalize_max_latency_ms(value)
+        patch_state(self.cfg.state_path, max_latency_ms=ms)
+        self.max_latency_ms = ms
+        return ms
+
     def export_items(self) -> list[dict[str, str]]:
-        return ready_items(catalog_rows(self.client, self.cfg))
+        return ready_items(catalog_rows(self.client, self.cfg, max_latency_ms=self.max_latency_ms))
 
 
 def _unauthorized(handler: BaseHTTPRequestHandler) -> None:
@@ -218,7 +226,15 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             if path == "/api/settings":
                 try:
                     payload = self._read_json()
-                    seconds = app.set_sync_interval(payload.get("sync_interval_seconds"))
+                    changed = False
+                    if "sync_interval_seconds" in payload:
+                        app.set_sync_interval(payload.get("sync_interval_seconds"))
+                        changed = True
+                    if "max_latency_ms" in payload:
+                        app.set_max_latency_ms(payload.get("max_latency_ms"))
+                        changed = True
+                    if not changed:
+                        raise ValueError("settings required")
                 except json.JSONDecodeError:
                     self._json({"error": {"code": "BAD_REQUEST", "message": "invalid JSON"}}, 400)
                     return
@@ -228,7 +244,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._json(
                     {
                         "ok": True,
-                        "sync_interval_seconds": seconds,
+                        "sync_interval_seconds": app.sync_interval_seconds,
+                        "max_latency_ms": app.max_latency_ms,
                         "next_sync_at": app.next_sync_at(),
                     }
                 )
@@ -264,6 +281,16 @@ def _load_sync_interval(cfg: Config) -> int:
         return normalize_sync_interval(raw)
     except ValueError:
         return cfg.sync_interval_seconds
+
+
+def _load_max_latency_ms(cfg: Config) -> int:
+    raw = load_state(cfg.state_path).get("max_latency_ms")
+    if raw is None:
+        return cfg.max_latency_ms
+    try:
+        return normalize_max_latency_ms(raw)
+    except ValueError:
+        return cfg.max_latency_ms
 
 
 def _safe_sync(app: App) -> None:

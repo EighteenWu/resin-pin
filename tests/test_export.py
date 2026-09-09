@@ -20,6 +20,15 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["copy_all"], "http://hk-1:x@h:2260")
 
+    def test_ready_items_skip_slow(self) -> None:
+        items = ready_items(
+            [
+                {"ready": False, "status": "slow", "proxy_url": "http://hk-1:x@h:2260", "region": "hk", "name": "hk-1"},
+                {"ready": True, "proxy_url": "http://jp-1:x@h:2260", "region": "jp", "name": "jp-1"},
+            ]
+        )
+        self.assertEqual(items, [{"proxyUrl": "http://jp-1:x@h:2260", "region": "jp", "name": "jp-1"}])
+
 
 if __name__ == "__main__":
     unittest.main()

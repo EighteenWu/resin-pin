@@ -48,6 +48,7 @@ class Config:
     ui_token: str
     regions: tuple[str, ...]
     pull_token: str = ""
+    max_latency_ms: int = 0
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -75,6 +76,7 @@ class Config:
             ui_token=ui_token,
             pull_token=_env("PIN_PULL_TOKEN") or ui_token,
             regions=regions or REGIONS,
+            max_latency_ms=normalize_max_latency_ms(_env("PIN_MAX_LATENCY_MS") or 0),
         )
 
     def proxy_url(self, platform_name: str) -> str:
@@ -104,3 +106,19 @@ def normalize_sync_interval(value: object) -> int:
     if seconds > MAX_SYNC_INTERVAL_SECONDS:
         raise ValueError(f"sync_interval_seconds must be <= {MAX_SYNC_INTERVAL_SECONDS}")
     return seconds
+
+
+def normalize_max_latency_ms(value: object) -> int:
+    if isinstance(value, bool) or value is None:
+        raise ValueError("max_latency_ms must be an integer")
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            raise ValueError("max_latency_ms must be an integer")
+    try:
+        ms = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_latency_ms must be an integer") from exc
+    if ms < 0:
+        raise ValueError("max_latency_ms must be >= 0")
+    return ms

@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from .config import MANAGED_MARKER, NAME_PATTERN, Config
+from .config import MANAGED_MARKER, NAME_PATTERN, Config, normalize_max_latency_ms
 from .state import load_state, save_state
 
 _RE2_SPECIAL = re.compile(r"([\\.+*?()|\[\]{}^$])")
@@ -75,7 +75,26 @@ def is_eligible(node: dict[str, Any], regions: tuple[str, ...]) -> bool:
     return True
 
 
-def node_status(node: dict[str, Any] | None, routable_count: int) -> str:
+def node_latency_ms(node: dict[str, Any] | None) -> float | None:
+    if not node:
+        return None
+    raw = node.get("reference_latency_ms")
+    if raw is None or raw == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def latency_too_high(node: dict[str, Any] | None, max_latency_ms: int) -> bool:
+    if max_latency_ms <= 0:
+        return False
+    latency = node_latency_ms(node)
+    return latency is not None and latency > max_latency_ms
+
+
+def node_status(node: dict[str, Any] | None, routable_count: int, max_latency_ms: int = 0) -> str:
     if node is None:
         return "gone"
     if not node.get("enabled", True):
@@ -88,12 +107,15 @@ def node_status(node: dict[str, Any] | None, routable_count: int) -> str:
         return "no_egress"
     if routable_count <= 0:
         return "not_routable"
+    if latency_too_high(node, max_latency_ms):
+        return "slow"
     return "ready"
 
 
 def status_label(code: str) -> str:
     return {
         "ready": "可用",
+        "slow": "延迟过高",
         "circuit": "熔断",
         "no_egress": "无出口",
         "no_outbound": "无出站",
@@ -227,13 +249,27 @@ def reconcile(client: PlatformAPI, cfg: Config, state_path: str | None = None) -
     return result
 
 
+def _effective_max_latency_ms(cfg: Config, state: dict[str, Any], override: int | None) -> int:
+    if override is not None:
+        return override
+    raw = state.get("max_latency_ms")
+    if raw is None:
+        return cfg.max_latency_ms
+    try:
+        return normalize_max_latency_ms(raw)
+    except ValueError:
+        return cfg.max_latency_ms
+
+
 def catalog_rows(
     client: PlatformAPI,
     cfg: Config,
     state_path: str | None = None,
+    max_latency_ms: int | None = None,
 ) -> list[dict[str, Any]]:
     path = state_path or cfg.state_path
     state = load_state(path)
+    limit = _effective_max_latency_ms(cfg, state, max_latency_ms)
     platforms = {item["id"]: item for item in client.list_platforms() if item.get("id")}
     nodes: dict[str, dict[str, Any]] = {}
     for region in cfg.regions:
@@ -247,7 +283,7 @@ def catalog_rows(
         node = nodes.get(node_hash)
         name = (platform or {}).get("name") or record.get("name") or ""
         routable = int((platform or {}).get("routable_node_count") or 0)
-        code = node_status(node, routable)
+        code = node_status(node, routable, limit)
         region = (record.get("region") or (node or {}).get("region") or "").lower()
         rows.append(
             {
@@ -256,7 +292,7 @@ def catalog_rows(
                 "node_hash": node_hash,
                 "tag": record.get("tag") or node_tag(node or {}),
                 "egress_ip": (node or {}).get("egress_ip") or "",
-                "latency_ms": (node or {}).get("reference_latency_ms"),
+                "latency_ms": node_latency_ms(node),
                 "routable_node_count": routable,
                 "status": code,
                 "status_label": status_label(code),

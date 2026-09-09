@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from resin_pin.config import MANAGED_MARKER, Config
+from resin_pin.state import patch_state
 from resin_pin.reconcile import (
     allocate_name,
     catalog_rows,
@@ -83,6 +84,10 @@ class FilterTests(unittest.TestCase):
         self.assertEqual(node_status(healthy("hk", 1, egress_ip=""), 1), "no_egress")
         self.assertEqual(node_status(healthy("hk", 1), 0), "not_routable")
         self.assertEqual(node_status(healthy("hk", 1), 1), "ready")
+        self.assertEqual(node_status(healthy("hk", 1), 1, 50), "slow")
+        self.assertEqual(node_status(healthy("hk", 1), 1, 80), "ready")
+        self.assertEqual(node_status(healthy("hk", 1, reference_latency_ms=None), 1, 50), "ready")
+        self.assertEqual(node_status(healthy("hk", 1, circuit_open_since="t"), 1, 50), "circuit")
 
 
 class ReconcileTests(unittest.TestCase):
@@ -165,6 +170,31 @@ class ReconcileTests(unittest.TestCase):
             client.nodes[0]["circuit_open_since"] = "2026-09-05T00:00:00Z"
             rows = catalog_rows(client, cfg(path), path)
             self.assertEqual(rows[0]["status_label"], "熔断")
+            self.assertFalse(rows[0]["ready"])
+
+    def test_catalog_marks_high_latency_not_ready(self) -> None:
+        client = FakeClient()
+        client.nodes = [healthy("hk", 1, reference_latency_ms=80.0), healthy("jp", 1, reference_latency_ms=40.0)]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "state.json")
+            reconcile(client, cfg(path), path)
+            self.assertEqual(len(client.platforms), 2)
+            rows = catalog_rows(client, cfg(path), path, max_latency_ms=50)
+            by_name = {row["name"]: row for row in rows}
+            self.assertEqual(by_name["hk-1"]["status"], "slow")
+            self.assertFalse(by_name["hk-1"]["ready"])
+            self.assertEqual(by_name["jp-1"]["status"], "ready")
+            self.assertTrue(by_name["jp-1"]["ready"])
+
+    def test_catalog_reads_latency_limit_from_state(self) -> None:
+        client = FakeClient()
+        client.nodes = [healthy("hk", 1, reference_latency_ms=80.0)]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "state.json")
+            reconcile(client, cfg(path), path)
+            patch_state(path, max_latency_ms=50)
+            rows = catalog_rows(client, cfg(path), path)
+            self.assertEqual(rows[0]["status"], "slow")
             self.assertFalse(rows[0]["ready"])
 
 

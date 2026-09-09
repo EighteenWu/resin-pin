@@ -126,7 +126,7 @@
       }
       .ready { color: var(--ready); }
       .circuit, .gone, .disabled { color: var(--hot); }
-      .no_egress, .no_outbound, .not_routable { color: var(--warn); }
+      .no_egress, .no_outbound, .not_routable, .slow { color: var(--warn); }
       .login {
         max-width: 420px;
         margin: 12vh auto 0;
@@ -233,6 +233,18 @@
         showToast(seconds ? "已更新同步间隔" : "已关闭定时同步");
       }
 
+      async function saveMaxLatency(ms) {
+        const res = await fetch("api/settings", {
+          method: "POST",
+          headers: { ...headers(), "Content-Type": "application/json" },
+          body: JSON.stringify({ max_latency_ms: ms }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || "保存失败");
+        await loadCatalog();
+        showToast(ms ? "已更新延迟上限 " + ms + " ms" : "已取消延迟过滤");
+      }
+
       function formatInterval(seconds) {
         if (!seconds) return "已关闭";
         if (seconds % 86400 === 0) return seconds / 86400 + " 天";
@@ -297,6 +309,7 @@
         const syncAt = catalog.last_sync?.at ? new Date(catalog.last_sync.at).toLocaleString() : "尚未同步";
         const interval = Number(catalog.sync_interval_seconds || 0);
         const selected = intervalSelectValue(interval);
+        const maxLatency = Number(catalog.max_latency_ms || 0);
         app.innerHTML = `
           <header>
             <div>
@@ -330,6 +343,15 @@
               <button id="saveCustom" type="button">应用</button>
             </div>
             <div class="hint">下次同步<b style="display:block;color:var(--paper);font-size:16px;margin-top:6px">${nextSyncLabel()}</b></div>
+          </section>
+          <section class="settings">
+            <label>最大延迟 (ms)
+              <div class="custom">
+                <input id="maxLatency" type="number" min="0" step="1" value="${maxLatency}" />
+                <button id="saveLatency" type="button">应用</button>
+              </div>
+            </label>
+            <div class="hint">超过该值的节点仍会钉住，但不进入可用和订阅。0 表示不限制。</div>
           </section>
           <div class="filters">
             ${["all", "ready", ...(catalog.regions || [])]
@@ -409,6 +431,28 @@
           } catch (err) {
             showToast(err.message);
             ev.target.disabled = false;
+          }
+        });
+        async function applyMaxLatency() {
+          const ms = Number(document.getElementById("maxLatency").value);
+          if (!Number.isInteger(ms) || ms < 0) {
+            showToast("请输入不少于 0 的整数毫秒");
+            return;
+          }
+          const btn = document.getElementById("saveLatency");
+          btn.disabled = true;
+          try {
+            await saveMaxLatency(ms);
+          } catch (err) {
+            showToast(err.message);
+            btn.disabled = false;
+          }
+        }
+        document.getElementById("saveLatency").addEventListener("click", applyMaxLatency);
+        document.getElementById("maxLatency").addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            applyMaxLatency();
           }
         });
         app.querySelectorAll("[data-region]").forEach((btn) => {
