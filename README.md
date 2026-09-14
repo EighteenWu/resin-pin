@@ -1,6 +1,6 @@
 # Resin Pin
 
-Resin 旁边的 sidecar：每天把节点池里 **TW / JP / HK / SG / KR** 的可用节点钉成单节点 Platform，并提供可复制、可订阅的 HTTP 正向代理链接。
+Resin 旁边的 sidecar：每天把节点池里选定地区（默认 **TW / JP / HK / KR**，页面可开关 SG 等）的可用节点钉成单节点 Platform，并提供可复制、可订阅的 HTTP 正向代理链接。
 
 不修改 Resin 源码。对账走官方 Admin API。
 
@@ -12,8 +12,8 @@ http://<platform>:<proxy-token>@<public-host>:<port>
 
 ## 做什么
 
-1. 筛选启用、有出站、未熔断、已有出口 IP 的 `tw/jp/hk/sg/kr` 节点。
-2. 为每个节点创建一个 Platform（`hk-1`、`jp-2`…），用标签正则钉死这一条。
+1. 筛选启用、有出站、未熔断、已有出口 IP 的地区节点。默认 `tw/jp/hk/kr`，页面「启用地区」可开关（含 SG），写入 `state.json`。
+2. 为每个节点创建一个 Platform（`hk-1`、`jp-2`…），用标签正则钉死这一条。关掉的地区在同步后删除对应自动 Platform。
 3. 节点消失后删除对应自动 Platform，不碰你手动建的 Platform。
 4. 页面展示状态，支持按最大延迟（毫秒）过滤可用节点，单条复制和一键复制全部可用链接。
 5. 提供订阅地址，让下游工具按间隔拉取。超限节点不进入订阅。

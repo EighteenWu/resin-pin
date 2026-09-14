@@ -76,6 +76,31 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(load_state(path)["max_latency_ms"], 90)
             self.assertIn("nodes", load_state(path))
 
+    def test_save_state_keeps_regions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "state.json")
+            patch_state(path, regions=["tw", "hk"])
+            save_state(path, {"nodes": {"abc": {"name": "hk-1"}}})
+            data = load_state(path)
+            self.assertEqual(data["regions"], ["tw", "hk"])
+            self.assertEqual(data["nodes"]["abc"]["name"], "hk-1")
+
+    def test_app_reads_and_updates_regions(self) -> None:
+        client = FakeClient()
+        client.nodes = [healthy("hk", 1), healthy("sg", 1)]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "state.json")
+            app = App(cfg(path, regions=("tw", "jp", "hk", "sg", "kr")))
+            app.client = client
+            self.assertEqual(app.regions, ("tw", "jp", "hk", "sg", "kr"))
+            app.set_regions(["hk", "jp"])
+            self.assertEqual(app.regions, ("hk", "jp"))
+            self.assertEqual(load_state(path)["regions"], ["hk", "jp"])
+            self.assertEqual(app.catalog()["regions"], ["hk", "jp"])
+            self.assertIn("sg", app.catalog()["available_regions"])
+            app.run_sync()
+            self.assertEqual({item["name"] for item in client.platforms}, {"hk-1"})
+
     def test_catalog_and_export_honor_max_latency(self) -> None:
         client = FakeClient()
         client.nodes = [healthy("hk", 1, reference_latency_ms=80.0)]

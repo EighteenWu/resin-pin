@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from .config import MANAGED_MARKER, NAME_PATTERN, Config, normalize_max_latency_ms
+from .config import MANAGED_MARKER, NAME_PATTERN, Config, normalize_max_latency_ms, normalize_regions
 from .state import load_state, save_state
 
 _RE2_SPECIAL = re.compile(r"([\\.+*?()|\[\]{}^$])")
@@ -144,6 +144,18 @@ class SyncResult:
     error: str = ""
 
 
+def effective_regions(cfg: Config, state: dict[str, Any] | None = None, state_path: str | None = None) -> tuple[str, ...]:
+    if state is None:
+        state = load_state(state_path or cfg.state_path)
+    raw = state.get("regions")
+    if raw is None:
+        return cfg.regions
+    try:
+        return normalize_regions(raw)
+    except ValueError:
+        return cfg.regions
+
+
 def collect_eligible_nodes(client: PlatformAPI, regions: tuple[str, ...]) -> list[dict[str, Any]]:
     found: dict[str, dict[str, Any]] = {}
     for region in regions:
@@ -175,8 +187,9 @@ def reconcile(client: PlatformAPI, cfg: Config, state_path: str | None = None) -
 
     state = load_state(path)
     nodes_state: dict[str, Any] = state.setdefault("nodes", {})
+    regions = effective_regions(cfg, state)
 
-    eligible = collect_eligible_nodes(client, cfg.regions)
+    eligible = collect_eligible_nodes(client, regions)
     result.eligible = len(eligible)
     eligible_by_hash = {item["node_hash"]: item for item in eligible}
 
@@ -270,9 +283,10 @@ def catalog_rows(
     path = state_path or cfg.state_path
     state = load_state(path)
     limit = _effective_max_latency_ms(cfg, state, max_latency_ms)
+    regions = effective_regions(cfg, state)
     platforms = {item["id"]: item for item in client.list_platforms() if item.get("id")}
     nodes: dict[str, dict[str, Any]] = {}
-    for region in cfg.regions:
+    for region in regions:
         for node in client.list_nodes(region=region, enabled=None):
             if node.get("node_hash"):
                 nodes[node["node_hash"]] = node
@@ -300,7 +314,7 @@ def catalog_rows(
                 "ready": code == "ready",
             }
         )
-    region_rank = {item: idx for idx, item in enumerate(cfg.regions)}
+    region_rank = {item: idx for idx, item in enumerate(regions)}
     rows.sort(
         key=lambda row: (
             region_rank.get(row["region"], 99),

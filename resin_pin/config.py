@@ -4,7 +4,8 @@ import os
 from dataclasses import dataclass
 
 
-REGIONS = ("tw", "jp", "hk", "sg", "kr")
+AVAILABLE_REGIONS = ("tw", "jp", "hk", "sg", "kr")
+REGIONS = ("tw", "jp", "hk", "kr")
 MANAGED_MARKER = "!^__resin_pin_managed__$"
 NAME_PATTERN = r"^([a-z]{2})-(\d+)$"
 REGION_ALIASES = {"sgp": "sg", "korea": "kr", "kor": "kr"}
@@ -57,11 +58,10 @@ class Config:
         admin_token = _env("RESIN_ADMIN_TOKEN")
         ui_token = _env("PIN_UI_TOKEN") or admin_token
         regions_raw = _env("PIN_REGIONS", ",".join(REGIONS))
-        regions = tuple(
-            REGION_ALIASES.get(item.strip().lower(), item.strip().lower())
-            for item in regions_raw.split(",")
-            if item.strip()
-        )
+        try:
+            regions = normalize_regions(regions_raw)
+        except ValueError:
+            regions = REGIONS
         return cls(
             resin_url=_env("RESIN_URL", "http://127.0.0.1:2260").rstrip("/"),
             admin_token=admin_token,
@@ -75,7 +75,7 @@ class Config:
             sync_on_start=_env_bool("PIN_SYNC_ON_START", True),
             ui_token=ui_token,
             pull_token=_env("PIN_PULL_TOKEN") or ui_token,
-            regions=regions or REGIONS,
+            regions=regions,
             max_latency_ms=normalize_max_latency_ms(_env("PIN_MAX_LATENCY_MS") or 0),
         )
 
@@ -106,6 +106,30 @@ def normalize_sync_interval(value: object) -> int:
     if seconds > MAX_SYNC_INTERVAL_SECONDS:
         raise ValueError(f"sync_interval_seconds must be <= {MAX_SYNC_INTERVAL_SECONDS}")
     return seconds
+
+
+def normalize_regions(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        items = [item.strip() for item in value.split(",")]
+    elif isinstance(value, (list, tuple)):
+        items = [str(item).strip() for item in value]
+    else:
+        raise ValueError("regions must be a list")
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if not item:
+            continue
+        region = REGION_ALIASES.get(item.lower(), item.lower())
+        if region not in AVAILABLE_REGIONS:
+            raise ValueError(f"unsupported region {item}")
+        if region in seen:
+            continue
+        seen.add(region)
+        out.append(region)
+    if not out:
+        raise ValueError("regions must not be empty")
+    return tuple(out)
 
 
 def normalize_max_latency_ms(value: object) -> int:

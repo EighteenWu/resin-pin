@@ -89,6 +89,8 @@
         border: 1px solid var(--line);
         background: rgba(28, 24, 18, 0.86);
       }
+      .settings.span { grid-template-columns: 1fr auto; align-items: start; }
+      .region-toggles { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
       .settings label {
         display: block;
         color: var(--mute);
@@ -211,13 +213,13 @@
         renderApp();
       }
 
-      async function syncNow() {
+      async function syncNow(okText) {
         const res = await fetch("api/sync", { method: "POST", headers: headers() });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error?.message || "同步失败");
         catalog = data.catalog;
         renderApp();
-        showToast("已同步");
+        showToast(okText || "已同步");
       }
 
       async function saveInterval(seconds) {
@@ -231,6 +233,17 @@
         catalog = { ...catalog, sync_interval_seconds: data.sync_interval_seconds, next_sync_at: data.next_sync_at };
         renderApp();
         showToast(seconds ? "已更新同步间隔" : "已关闭定时同步");
+      }
+
+      async function saveRegions(regions) {
+        const res = await fetch("api/settings", {
+          method: "POST",
+          headers: { ...headers(), "Content-Type": "application/json" },
+          body: JSON.stringify({ regions }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || "保存失败");
+        await syncNow("已更新地区并同步");
       }
 
       async function saveMaxLatency(ms) {
@@ -315,7 +328,7 @@
             <div>
               <div class="kicker">Patch bay · ${catalog.public_host}</div>
               <h1>单节点代理</h1>
-              <p class="sub">${(catalog.regions || []).map((item) => item.toUpperCase()).join(" / ")} 可用节点各绑一个 Platform。下游项目订阅 <code>api/export?token=拉取密钥</code> 即可按间隔自动更新。</p>
+              <p class="sub">${(catalog.regions || []).map((item) => item.toUpperCase()).join(" / ") || "未启用地区"} 可用节点各绑一个 Platform。下游项目订阅 <code>api/export?token=拉取密钥</code> 即可按间隔自动更新。</p>
             </div>
             <div class="actions">
               <button id="copyAll" class="primary" ${ready ? "" : "disabled"}>一键复制可用 ${ready}</button>
@@ -343,6 +356,23 @@
               <button id="saveCustom" type="button">应用</button>
             </div>
             <div class="hint">下次同步<b style="display:block;color:var(--paper);font-size:16px;margin-top:6px">${nextSyncLabel()}</b></div>
+          </section>
+          <section class="settings span">
+            <div>
+              <label>启用地区</label>
+              <div class="region-toggles" id="regionToggles">
+                ${(catalog.available_regions || ["tw", "jp", "hk", "sg", "kr"])
+                  .map(
+                    (item) =>
+                      `<button type="button" class="chip ${(catalog.regions || []).includes(item) ? "active" : ""}" data-enable-region="${item}">${item.toUpperCase()}</button>`
+                  )
+                  .join("")}
+              </div>
+            </div>
+            <div>
+              <button id="saveRegions" type="button">应用并同步</button>
+              <div class="hint" style="padding-bottom:0;margin-top:8px">关掉的地区同步后会删除对应 Platform，订阅不再包含。至少保留一个。</div>
+            </div>
           </section>
           <section class="settings">
             <label>最大延迟 (ms)
@@ -448,6 +478,27 @@
             btn.disabled = false;
           }
         }
+        document.getElementById("regionToggles").querySelectorAll("[data-enable-region]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            btn.classList.toggle("active");
+          });
+        });
+        document.getElementById("saveRegions").addEventListener("click", async (ev) => {
+          const selected = [...document.getElementById("regionToggles").querySelectorAll("[data-enable-region].active")].map(
+            (btn) => btn.dataset.enableRegion
+          );
+          if (!selected.length) {
+            showToast("至少启用一个地区");
+            return;
+          }
+          ev.target.disabled = true;
+          try {
+            await saveRegions(selected);
+          } catch (err) {
+            showToast(err.message);
+            ev.target.disabled = false;
+          }
+        });
         document.getElementById("saveLatency").addEventListener("click", applyMaxLatency);
         document.getElementById("maxLatency").addEventListener("keydown", (ev) => {
           if (ev.key === "Enter") {

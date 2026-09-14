@@ -19,7 +19,7 @@ from resin_pin.reconcile import (
 from tests.fake_client import FakeClient
 
 
-def cfg(state_path: str) -> Config:
+def cfg(state_path: str, regions: tuple[str, ...] = ("tw", "jp", "hk", "kr")) -> Config:
     return Config(
         resin_url="http://resin",
         admin_token="admin",
@@ -32,7 +32,7 @@ def cfg(state_path: str) -> Config:
         sync_interval_seconds=86400,
         sync_on_start=True,
         ui_token="admin",
-        regions=("tw", "jp", "hk", "sg", "kr"),
+        regions=regions,
     )
 
 
@@ -66,9 +66,10 @@ class FilterTests(unittest.TestCase):
         self.assertFalse(is_managed_platform(manual))
 
     def test_eligible_requires_region_health_egress_and_tag(self) -> None:
-        regions = ("tw", "jp", "hk", "sg", "kr")
+        regions = ("tw", "jp", "hk", "kr")
         self.assertTrue(is_eligible(healthy("hk", 1), regions))
         self.assertTrue(is_eligible(healthy("kr", 1), regions))
+        self.assertFalse(is_eligible(healthy("sg", 1), regions))
         self.assertFalse(is_eligible(healthy("us", 1), regions))
         self.assertFalse(is_eligible(healthy("hk", 1, circuit_open_since="2026-01-01T00:00:00Z"), regions))
         self.assertFalse(is_eligible(healthy("hk", 1, egress_ip=""), regions))
@@ -93,11 +94,11 @@ class FilterTests(unittest.TestCase):
 class ReconcileTests(unittest.TestCase):
     def test_creates_one_platform_per_healthy_node_and_stable_names(self) -> None:
         client = FakeClient()
-        client.nodes = [healthy("hk", 5), healthy("jp", 1), healthy("sg", 2), healthy("kr", 1)]
+        client.nodes = [healthy("hk", 5), healthy("jp", 1), healthy("tw", 2), healthy("kr", 1)]
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "state.json")
             first = reconcile(client, cfg(path), path)
-            self.assertEqual(sorted(first.created), ["hk-1", "jp-1", "kr-1", "sg-1"])
+            self.assertEqual(sorted(first.created), ["hk-1", "jp-1", "kr-1", "tw-1"])
             self.assertEqual(len(client.platforms), 4)
             self.assertTrue(all(item["regex_filters"][0].startswith("^") for item in client.platforms))
 
@@ -105,11 +106,35 @@ class ReconcileTests(unittest.TestCase):
             second = reconcile(client, cfg(path), path)
             self.assertEqual(second.created, ["hk-2"])
             names = {item["name"] for item in client.platforms}
-            self.assertEqual(names, {"hk-1", "hk-2", "jp-1", "kr-1", "sg-1"})
+            self.assertEqual(names, {"hk-1", "hk-2", "jp-1", "kr-1", "tw-1"})
 
             hk1 = next(item for item in client.platforms if item["name"] == "hk-1")
             self.assertEqual(hk1["regex_filters"][0], r"^pool/hk-5$")
             self.assertEqual(hk1["region_filters"], ["hk"])
+
+    def test_reconcile_honors_regions_saved_in_state(self) -> None:
+        client = FakeClient()
+        client.nodes = [healthy("hk", 1), healthy("sg", 1)]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "state.json")
+            all_regions = ("tw", "jp", "hk", "sg", "kr")
+            reconcile(client, cfg(path, regions=all_regions), path)
+            self.assertEqual({item["name"] for item in client.platforms}, {"hk-1", "sg-1"})
+            patch_state(path, regions=["hk"])
+            result = reconcile(client, cfg(path, regions=all_regions), path)
+            self.assertEqual(result.deleted, ["sg-1"])
+            self.assertEqual([item["name"] for item in client.platforms], ["hk-1"])
+
+    def test_deletes_sg_platform_when_region_dropped(self) -> None:
+        client = FakeClient()
+        client.nodes = [healthy("hk", 1), healthy("sg", 1)]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "state.json")
+            reconcile(client, cfg(path, regions=("tw", "jp", "hk", "sg", "kr")), path)
+            self.assertEqual({item["name"] for item in client.platforms}, {"hk-1", "sg-1"})
+            result = reconcile(client, cfg(path), path)
+            self.assertEqual(result.deleted, ["sg-1"])
+            self.assertEqual([item["name"] for item in client.platforms], ["hk-1"])
 
     def test_does_not_steal_manual_platform_names(self) -> None:
         client = FakeClient()

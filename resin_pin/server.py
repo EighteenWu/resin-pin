@@ -11,9 +11,9 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .client import ResinClient, ResinError
-from .config import Config, normalize_max_latency_ms, normalize_sync_interval
+from .config import AVAILABLE_REGIONS, Config, normalize_max_latency_ms, normalize_regions, normalize_sync_interval
 from .export import export_json, export_text, ready_items
-from .reconcile import SyncResult, catalog_rows, reconcile, status_label
+from .reconcile import SyncResult, catalog_rows, effective_regions, reconcile, status_label
 from .state import load_state, patch_state
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -36,6 +36,7 @@ class App:
         self.sync_wake = threading.Event()
         self.sync_interval_seconds = _load_sync_interval(cfg)
         self.max_latency_ms = _load_max_latency_ms(cfg)
+        self.regions = _load_regions(cfg)
         self.wait_started_at: datetime | None = None
 
     def run_sync(self) -> SyncResult:
@@ -72,7 +73,8 @@ class App:
             "total": len(rows),
             "copy_all": "\n".join(ready_urls),
             "public_host": f"{self.cfg.public_host}:{self.cfg.public_port}",
-            "regions": list(self.cfg.regions),
+            "regions": list(self.regions),
+            "available_regions": list(AVAILABLE_REGIONS),
             "syncing": self.syncing,
             "last_sync": asdict(self.last),
             "sync_interval_seconds": self.sync_interval_seconds,
@@ -99,6 +101,12 @@ class App:
         patch_state(self.cfg.state_path, max_latency_ms=ms)
         self.max_latency_ms = ms
         return ms
+
+    def set_regions(self, value: object) -> tuple[str, ...]:
+        regions = normalize_regions(value)
+        patch_state(self.cfg.state_path, regions=list(regions))
+        self.regions = regions
+        return regions
 
     def export_items(self) -> list[dict[str, str]]:
         return ready_items(catalog_rows(self.client, self.cfg, max_latency_ms=self.max_latency_ms))
@@ -233,6 +241,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     if "max_latency_ms" in payload:
                         app.set_max_latency_ms(payload.get("max_latency_ms"))
                         changed = True
+                    if "regions" in payload:
+                        app.set_regions(payload.get("regions"))
+                        changed = True
                     if not changed:
                         raise ValueError("settings required")
                 except json.JSONDecodeError:
@@ -246,6 +257,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         "ok": True,
                         "sync_interval_seconds": app.sync_interval_seconds,
                         "max_latency_ms": app.max_latency_ms,
+                        "regions": list(app.regions),
                         "next_sync_at": app.next_sync_at(),
                     }
                 )
@@ -291,6 +303,10 @@ def _load_max_latency_ms(cfg: Config) -> int:
         return normalize_max_latency_ms(raw)
     except ValueError:
         return cfg.max_latency_ms
+
+
+def _load_regions(cfg: Config) -> tuple[str, ...]:
+    return effective_regions(cfg)
 
 
 def _safe_sync(app: App) -> None:
