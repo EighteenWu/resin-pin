@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SETTINGS_KEYS = ("sync_interval_seconds", "max_latency_ms", "regions")
+SETTINGS_KEYS = ("sync_interval_seconds", "max_latency_ms", "regions", "auto_pool_enabled")
 
 _file_lock = threading.Lock()
 

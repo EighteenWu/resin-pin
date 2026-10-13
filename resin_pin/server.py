@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .auto_pool import refresh_auto_pool
 from .client import ResinClient, ResinError
 from .config import AVAILABLE_REGIONS, Config, normalize_max_latency_ms, normalize_regions, normalize_sync_interval
 from .export import export_json, export_text, ready_items
@@ -37,6 +38,8 @@ class App:
         self.sync_interval_seconds = _load_sync_interval(cfg)
         self.max_latency_ms = _load_max_latency_ms(cfg)
         self.regions = _load_regions(cfg)
+        self.auto_pool_enabled = load_state(cfg.state_path).get("auto_pool_enabled") is True
+        self.auto_pool: dict[str, Any] | None = None
         self.wait_started_at: datetime | None = None
 
     def run_sync(self) -> SyncResult:
@@ -46,6 +49,15 @@ class App:
             self.syncing = True
         try:
             result = reconcile(self.client, self.cfg)
+            if self.auto_pool_enabled:
+                rows = catalog_rows(self.client, self.cfg, max_latency_ms=self.max_latency_ms)
+                self.auto_pool = refresh_auto_pool(self.client, self.cfg, rows)
+                print(
+                    f"panso auto pool: checked={self.auto_pool['checked']} "
+                    f"selected={len(self.auto_pool['selected'])} rejected={len(self.auto_pool['rejected'])} "
+                    f"empty={self.auto_pool['empty']}",
+                    flush=True,
+                )
             self.last = SyncSnapshot(
                 at=datetime.now(timezone.utc).isoformat(),
                 result=asdict(result),
@@ -79,6 +91,8 @@ class App:
             "last_sync": asdict(self.last),
             "sync_interval_seconds": self.sync_interval_seconds,
             "max_latency_ms": self.max_latency_ms,
+            "auto_pool_enabled": self.auto_pool_enabled,
+            "auto_pool": self.auto_pool,
             "next_sync_at": self.next_sync_at(),
             "status_labels": {code: status_label(code) for code in counts},
         }
@@ -110,6 +124,13 @@ class App:
 
     def export_items(self) -> list[dict[str, str]]:
         return ready_items(catalog_rows(self.client, self.cfg, max_latency_ms=self.max_latency_ms))
+
+    def set_auto_pool_enabled(self, enabled: object) -> bool:
+        if not isinstance(enabled, bool):
+            raise ValueError("auto_pool_enabled must be a boolean")
+        patch_state(self.cfg.state_path, auto_pool_enabled=enabled)
+        self.auto_pool_enabled = enabled
+        return enabled
 
 
 def _unauthorized(handler: BaseHTTPRequestHandler) -> None:
@@ -244,6 +265,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     if "regions" in payload:
                         app.set_regions(payload.get("regions"))
                         changed = True
+                    if "auto_pool_enabled" in payload:
+                        app.set_auto_pool_enabled(payload.get("auto_pool_enabled"))
+                        changed = True
                     if not changed:
                         raise ValueError("settings required")
                 except json.JSONDecodeError:
@@ -258,6 +282,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         "sync_interval_seconds": app.sync_interval_seconds,
                         "max_latency_ms": app.max_latency_ms,
                         "regions": list(app.regions),
+                        "auto_pool_enabled": app.auto_pool_enabled,
                         "next_sync_at": app.next_sync_at(),
                     }
                 )

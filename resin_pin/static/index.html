@@ -384,6 +384,17 @@
             <div class="hint">超过该值的节点仍会钉住，但不进入可用和订阅。0 表示不限制。</div>
           </section>
           <div class="filters">
+            ${catalog.auto_pool_enabled ? `<section class="settings span" style="width:100%">
+              <div>
+                <label>网盘代理自动优选 · HK / JP</label>
+                <div class="hint">夸克和百度均验证通过后，按实测耗时选入最多 8 个不同出口。每轮同步自动更新。</div>
+              </div>
+              <div class="hint">
+                ${catalog.auto_pool
+                  ? `当前 ${catalog.auto_pool.selected.length} 个出口 · 本轮验证 ${catalog.auto_pool.checked} 个，失败 ${catalog.auto_pool.rejected.length} 个<br>最近验证：${new Date(catalog.auto_pool.checked_at).toLocaleString()}${catalog.auto_pool.empty ? "<br>当前没有通过验证的节点，代理池不可用。" : ""}`
+                  : "等待首次验证"}
+              </div>
+            </section>` : ""}
             ${["all", "ready", ...(catalog.regions || [])]
               .map((item) => `<button class="chip ${regionFilter === item ? "active" : ""}" data-region="${item}">${item === "all" || item === "ready" ? item : item.toUpperCase()}</button>`)
               .join("")}
