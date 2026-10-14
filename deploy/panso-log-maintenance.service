@@ -1,0 +1,13 @@
+[Unit]
+Description=pan-so worker log rotation and Resin log/cache retention
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=TZ=Asia/Shanghai
+ExecStart=/usr/bin/python3 /root/resin-pin/deploy/host_log_maintenance.py --apply
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=15min

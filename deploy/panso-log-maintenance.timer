@@ -1,0 +1,10 @@
+[Unit]
+Description=Check pan-so logs every fifteen minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=panso-log-maintenance.service
+
+[Install]
+WantedBy=timers.target

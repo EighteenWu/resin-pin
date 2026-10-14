@@ -66,3 +66,7 @@ pan-so 容器使用 `http://panso-auto-hkjp:<代理密码>@resin:2260`，不带 
 本机测试：`python -m unittest discover -s tests -v`。
 部署遵循仓库流程：本地提交并推送后，在服务器拉取对应提交，执行
 `docker compose up -d --build resin-pin`，确认 `/healthz` 正常，再启用并验证自动池。
+
+宿主机日志轮转、过期请求日志及下载缓存维护见 [部署说明](deploy/log-maintenance.md)。
+该维护计时器独立安装，安装时不重建 resin-pin 或业务容器。
+搜索索引的空间与业务影响评估见 [索引优化评估](deploy/index-optimization-review.md)。
